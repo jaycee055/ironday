@@ -78,6 +78,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 .auth{min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:1fr}
 .auth-hero{position:relative;min-height:100vh;min-height:100dvh;background:#000 url(img/cover.jpg) center 20%/cover no-repeat;display:flex;flex-direction:column;justify-content:flex-end}
 .auth-hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,13,12,.1) 0%,rgba(11,13,12,.25) 28%,rgba(11,13,12,.9) 55%,var(--bg) 80%)}
+.auth-hero.dense::after{background:linear-gradient(180deg,rgba(11,13,12,.3) 0%,rgba(11,13,12,.82) 22%,rgba(11,13,12,.95) 40%,var(--bg) 60%)}
 .auth-panel{position:relative;z-index:1;padding:24px 22px calc(28px + var(--safe-b));max-width:480px;width:100%;margin:0 auto}
 .brand{font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:.08em}
 .brand b{color:var(--lime)}
@@ -251,7 +252,7 @@ ol.steps-list li::before{content:counter(s);width:28px;height:28px;border-radius
 @media (min-width:980px){
   .auth{grid-template-columns:1.15fr 1fr}
   .auth-hero{min-height:100vh}
-  .auth-hero::after{background:linear-gradient(90deg,rgba(11,13,12,0) 55%,var(--bg) 100%),linear-gradient(180deg,rgba(0,0,0,0) 60%,rgba(0,0,0,.55))}
+  .auth-hero::after,.auth-hero.dense::after{background:linear-gradient(90deg,rgba(11,13,12,0) 55%,var(--bg) 100%),linear-gradient(180deg,rgba(0,0,0,0) 60%,rgba(0,0,0,.55))}
   .auth-hero .auth-panel{display:none}
   .auth-side{display:flex!important;align-items:center}
   .tabbar{display:none}
@@ -690,20 +691,41 @@ function adoptCloud(r){
    LOGIN / COVER
    ========================================================= */
 let AUTH_MODE='guest';
+let FORGOT={email:'',step:1};
+const EYE='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18M10.6 5.1A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7c1.9 0 3.6-.6 5-1.5M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+function pwField(name,label,ac,ph){
+  return `<label class="field"><span>${label}</span><div style="position:relative"><input class="input" type="password" name="${name}" required minlength="6" autocomplete="${ac}" placeholder="${ph}" style="padding-right:50px">
+    <button type="button" data-eye aria-label="Show password" title="Show password" style="position:absolute;right:4px;top:4px;width:42px;height:42px;display:grid;place-items:center;color:var(--muted);border-radius:10px">${EYE}</button></div></label>`;
+}
 function authFormHtml(mode){
   const arrow=I.arrow.replace('<svg','<svg width="20" height="20"');
+  const err='<p class="small" data-err style="color:var(--red)"></p>';
   if(mode==='login') return `<form class="authf stack" data-mode="login" autocomplete="on">
       <label class="field"><span>Email</span><input class="input" type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
-      <label class="field"><span>Password</span><input class="input" type="password" name="password" required minlength="6" autocomplete="current-password" placeholder="Your password"></label>
-      <p class="small" data-err style="color:var(--red);min-height:0"></p>
-      <button class="btn btn-lime btn-block" type="submit">Sign In ${arrow}</button></form>`;
+      ${pwField('password','Password','current-password','Your password')}
+      <div class="row between"><span></span><span class="link small" data-am="forgot">Forgot password?</span></div>
+      ${err}<button class="btn btn-lime btn-block" type="submit">Sign In ${arrow}</button></form>`;
   if(mode==='signup') return `<form class="authf stack" data-mode="signup" autocomplete="on">
       <label class="field"><span>Your name</span><input class="input" name="name" required autocomplete="given-name" placeholder="e.g. Jason" value="${esc(S.user?.name||'')}"></label>
       <label class="field"><span>Email</span><input class="input" type="email" name="email" required autocomplete="email" placeholder="you@example.com" value="${esc(S.user?.email||'')}"></label>
-      <label class="field"><span>Password (min. 6 characters)</span><input class="input" type="password" name="password" required minlength="6" autocomplete="new-password" placeholder="Create a password"></label>
+      ${pwField('password','Password (min. 6 characters)','new-password','Create a password')}
+      ${pwField('confirm','Confirm password','new-password','Type it again')}
       <label class="row small" style="align-items:flex-start;gap:10px;cursor:pointer"><input type="checkbox" name="consent" required style="width:20px;height:20px;accent-color:var(--lime);margin-top:1px;flex:none"><span class="muted">I agree to the <a class="link" href="privacy.html">privacy policy</a>. My workout data will be backed up online so I can sign in on other devices.</span></label>
-      <p class="small" data-err style="color:var(--red)"></p>
-      <button class="btn btn-lime btn-block" type="submit">Create Account ${arrow}</button></form>`;
+      ${err}<button class="btn btn-lime btn-block" type="submit">Create Account ${arrow}</button></form>`;
+  if(mode==='forgot'){
+    if(FORGOT.step===1) return `<form class="authf stack" data-mode="forgot" autocomplete="on">
+      <p class="small muted">Enter your account email. We’ll send you a 6-digit code to reset your password.</p>
+      <label class="field"><span>Email</span><input class="input" type="email" name="email" required autocomplete="email" placeholder="you@example.com" value="${esc(FORGOT.email)}"></label>
+      ${err}<button class="btn btn-lime btn-block" type="submit">Send reset code ${arrow}</button></form>`;
+    return `<form class="authf stack" data-mode="forgot" autocomplete="off">
+      <p class="small muted">We sent a code to <b style="color:var(--text)">${esc(FORGOT.email)}</b>. Check your inbox (and spam folder). The code works for 15 minutes.</p>
+      <label class="field"><span>6-digit code</span><input class="input" name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456" style="letter-spacing:.3em;font-weight:700;font-size:20px"></label>
+      ${pwField('password','New password (min. 6 characters)','new-password','Create a new password')}
+      ${pwField('confirm','Confirm new password','new-password','Type it again')}
+      ${err}<button class="btn btn-lime btn-block" type="submit">Reset password ${arrow}</button>
+      <p class="small muted" style="text-align:center">Didn’t get it? <span class="link" data-resend>Send a new code</span></p></form>`;
+  }
   return `<form class="authf stack" data-mode="guest" autocomplete="on">
       <label class="field"><span>Your name</span><input class="input" name="name" required placeholder="e.g. Jason" autocomplete="given-name"></label>
       <button class="btn btn-lime btn-block" type="submit">Get Started ${arrow}</button></form>`;
@@ -712,46 +734,67 @@ function authSwitchHtml(mode){
   if(!accountsOn()) return '';
   if(mode==='guest') return `<div class="divider">or</div><div class="grid2"><button class="btn btn-ghost" data-am="login">Sign in</button><button class="btn btn-ghost" data-am="signup">Create account</button></div>
      <p class="tiny muted" style="text-align:center">An account is optional. It backs up your progress and syncs it to other devices.</p>`;
-  return `<p class="small muted" style="text-align:center">${mode==='login'?`New here? <span class="link" data-am="signup">Create an account</span>`:`Already have an account? <span class="link" data-am="login">Sign in</span>`}</p>
+  const top=mode==='login'?`New here? <span class="link" data-am="signup">Create an account</span>`:mode==='signup'?`Already have an account? <span class="link" data-am="login">Sign in</span>`:`Remembered it? <span class="link" data-am="login">Back to sign in</span>`;
+  return `<p class="small muted" style="text-align:center">${top}</p>
      <p class="small" style="text-align:center"><span class="link" data-am="guest" style="color:var(--muted)">Continue without an account</span></p>`;
 }
-async function submitAuth(f,after){
+function btnBusy(btn,text){const label=btn.innerHTML;btn.disabled=true;btn.textContent=text;return ()=>{btn.disabled=false;btn.innerHTML=label;};}
+async function submitAuth(f,after,setMode){
   const fd=new FormData(f), mode=f.dataset.mode, err=f.querySelector('[data-err]'), btn=f.querySelector('button[type=submit]');
+  const fail=(m,restore)=>{if(err)err.textContent=m;restore&&restore();};
   if(mode==='guest'){const name=String(fd.get('name')||'').trim();if(!name)return;
     S.user={name,email:'',goal:'Build muscle',level:'Beginner',joined:today()};save();after();return;}
-  const label=btn.innerHTML; btn.disabled=true; btn.textContent=mode==='login'?'Signing in…':'Creating account…'; if(err) err.textContent='';
+  if((mode==='signup'||(mode==='forgot'&&FORGOT.step===2)) && fd.get('password')!==fd.get('confirm')) return fail('Passwords don’t match. Please type the same password twice.');
+  if(err) err.textContent='';
   try{
+    if(mode==='forgot'&&FORGOT.step===1){
+      const restore=btnBusy(btn,'Sending code…'); const email=String(fd.get('email')||'').trim();
+      const r=await api('requestReset',{email}); if(!r.ok) return fail(r.error||'Something went wrong.',restore);
+      FORGOT={email,step:2}; toast('Reset code sent. Check your email.'); setMode('forgot'); return;
+    }
+    if(mode==='forgot'){
+      const restore=btnBusy(btn,'Resetting…');
+      const r=await api('resetPassword',{email:FORGOT.email,code:fd.get('code'),password:fd.get('password')});
+      if(!r.ok) return fail(r.error||'Something went wrong.',restore);
+      adoptCloud(r); FORGOT={email:'',step:1}; toast('Password changed. You’re signed in.'); after(); return;
+    }
+    const restore=btnBusy(btn,mode==='login'?'Signing in…':'Creating account…');
     const payload=mode==='login'
       ?{email:fd.get('email'),password:fd.get('password')}
       :{name:fd.get('name'),email:fd.get('email'),password:fd.get('password'),consent:!!fd.get('consent'),state:JSON.stringify({...S,user:{...(S.user||{}),name:String(fd.get('name')||'').trim(),email:String(fd.get('email')||'').trim(),goal:S.user?.goal||'Build muscle',level:S.user?.level||'Beginner',joined:S.user?.joined||today()}}),updated:Date.now()};
     const r=await api(mode,payload);
-    if(!r.ok){ if(err) err.textContent=r.error||'Something went wrong.'; btn.disabled=false; btn.innerHTML=label; return; }
+    if(!r.ok) return fail(r.error||'Something went wrong.',restore);
     adoptCloud(r); toast(mode==='login'?'Welcome back, '+r.user.name+'!':'Account created. Your progress is backed up.'); after();
-  }catch(e){ if(err) err.textContent='Can’t reach the server. Check your internet connection and try again.'; btn.disabled=false; btn.innerHTML=label; }
+  }catch(e){ fail('Can’t reach the server. Check your internet connection and try again.'); btn.disabled=false; btn.textContent=mode==='login'?'Sign In':mode==='signup'?'Create Account':FORGOT.step===1?'Send reset code':'Reset password'; }
 }
-function wireAuth(root,after,rerender){
-  root.querySelectorAll('.authf').forEach(f=>f.onsubmit=e=>{e.preventDefault();submitAuth(f,after);});
-  root.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{AUTH_MODE=b.dataset.am;rerender();});
+function wireAuth(root,after,setMode){
+  root.querySelectorAll('.authf').forEach(f=>f.onsubmit=e=>{e.preventDefault();submitAuth(f,after,setMode);});
+  root.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{const m=b.dataset.am;if(m==='forgot'){const em=b.closest('.authf')?.querySelector('input[name=email]')?.value||'';FORGOT={email:em.trim(),step:1};}setMode(m);});
+  root.querySelectorAll('[data-eye]').forEach(b=>b.onclick=()=>{const i=b.parentElement.querySelector('input');const show=i.type==='password';i.type=show?'text':'password';b.innerHTML=show?EYE_OFF:EYE;b.setAttribute('aria-label',show?'Hide password':'Show password');b.title=show?'Hide password':'Show password';i.focus();});
+  root.querySelectorAll('[data-resend]').forEach(b=>b.onclick=async()=>{b.textContent='Sending…';try{const r=await api('requestReset',{email:FORGOT.email});toast(r.ok?'New code sent':r.error);}catch(e){toast('Can’t reach the server');}b.textContent='Send a new code';});
 }
 function renderAuth(){
   const mode=accountsOn()?AUTH_MODE:'guest';
-  const title=mode==='login'?`Welcome<br><span class="lime">back.</span>`:mode==='signup'?`Create your<br><span class="lime">account.</span>`:`Transform your body.<br><span class="lime">Own every day.</span>`;
-  const sub=mode==='login'?'Sign in to get your programs and progress on this device.':mode==='signup'?'Back up your progress and use it on any phone or computer.':'Build your own program or start a ready-made plan. Daily tasks, phases and progress, all in one place.';
+  const title=mode==='login'?`Welcome<br><span class="lime">back.</span>`:mode==='signup'?`Create your<br><span class="lime">account.</span>`:mode==='forgot'?`Reset your<br><span class="lime">password.</span>`:`Transform your body.<br><span class="lime">Own every day.</span>`;
+  const sub=mode==='login'?'Sign in to get your programs and progress on this device.':mode==='signup'?'Back up your progress and use it on any phone or computer.':mode==='forgot'?'':'Build your own program or start a ready-made plan. Daily tasks, phases and progress, all in one place.';
   const form=`<div class="stack">
-    <div><div class="dots"><i class="${mode==='guest'?'on':''}"></i><i class="${mode==='login'?'on':''}"></i><i class="${mode==='signup'?'on':''}"></i></div></div>
-    <h1>${title}</h1><p class="muted">${sub}</p>
+    <div><div class="dots"><i class="${mode==='guest'?'on':''}"></i><i class="${mode==='login'||mode==='forgot'?'on':''}"></i><i class="${mode==='signup'?'on':''}"></i></div></div>
+    <h1>${title}</h1>${sub?`<p class="muted">${sub}</p>`:''}
     ${authFormHtml(mode)}${authSwitchHtml(mode)}
     ${mode==='guest'?`<p class="tiny muted" style="text-align:center">Your progress is saved on this device. <a class="link" href="privacy.html">Privacy</a></p>`:''}</div>`;
   $app.innerHTML=`<div class="auth">
-    <div class="auth-hero"><div class="auth-top brand">IRON<b>DAY</b></div><div class="auth-panel">${form}</div></div>
+    <div class="auth-hero ${mode==='guest'?'':'dense'}"><div class="auth-top brand">IRON<b>DAY</b></div><div class="auth-panel">${form}</div></div>
     <div class="auth-side"><div class="auth-panel" style="max-width:440px">${form}</div></div></div>`;
-  wireAuth($app,()=>{AUTH_MODE='guest';go(S.programs.length?'home':'choose');},renderAuth);
+  wireAuth($app,()=>{AUTH_MODE='guest';go(S.programs.length?'home':'choose');},m=>{AUTH_MODE=m;renderAuth();});
 }
 function openAccountSheet(mode){
-  const draw=s=>{s.querySelector('#acctBody').innerHTML=`<h2>${mode==='login'?'Sign in':'Create account'}</h2><p class="muted small" style="margin:6px 0 16px">${mode==='login'?'If your account already has data, it replaces what’s on this device.':'Your current programs and progress will be backed up to your new account.'}</p>${authFormHtml(mode)}
-      <p class="small muted" style="text-align:center;margin-top:14px">${mode==='login'?`New here? <span class="link" data-sm="signup">Create an account</span>`:`Already have an account? <span class="link" data-sm="login">Sign in</span>`}</p>`;
-    wireAuth(s,()=>{closeSheet();route();},()=>{});
-    s.querySelectorAll('[data-sm]').forEach(b=>b.onclick=()=>{mode=b.dataset.sm;draw(s);});};
+  const draw=s=>{
+    const head=mode==='login'?'Sign in':mode==='signup'?'Create account':'Reset password';
+    const note=mode==='login'?'If your account already has data, it replaces what’s on this device.':mode==='signup'?'Your current programs and progress will be backed up to your new account.':'';
+    const foot=mode==='login'?`New here? <span class="link" data-am="signup">Create an account</span>`:mode==='signup'?`Already have an account? <span class="link" data-am="login">Sign in</span>`:`Remembered it? <span class="link" data-am="login">Back to sign in</span>`;
+    s.querySelector('#acctBody').innerHTML=`<h2>${head}</h2>${note?`<p class="muted small" style="margin:6px 0 16px">${note}</p>`:'<div style="height:12px"></div>'}${authFormHtml(mode)}
+      <p class="small muted" style="text-align:center;margin-top:14px">${foot}</p>`;
+    wireAuth(s,()=>{closeSheet();route();},m=>{mode=m;draw(s);});};
   sheet(`<div class="row between" style="margin-bottom:6px"><span></span><button class="icon-btn" data-x>${I.x}</button></div><div id="acctBody"></div>`,s=>{s.querySelector('[data-x]').onclick=closeSheet;draw(s);});
 }
 function accountCard(){

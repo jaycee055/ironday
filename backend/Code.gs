@@ -17,6 +17,9 @@ const CFG = {
   LOCKOUT_SECONDS: 15 * 60,
   MAX_STATE_BYTES: 1500000,      // ~1.5 MB per user
   DRIVE_FULL_RATIO: 0.85,        // stop saving when the owner's Drive is 85% full
+  RESET_CODE_MINUTES: 15,
+  MAX_RESET_EMAILS_PER_HOUR: 3,  // per email address
+  MAX_RESET_TRIES: 5,            // wrong codes before the code is cancelled
 };
 
 /* ------------------------------------------------------------------ */
@@ -74,6 +77,8 @@ function doPost(e) {
       case 'load':          return json_(load_(req));
       case 'save':          return json_(save_(req));
       case 'deleteAccount': return json_(deleteAccount_(req));
+      case 'requestReset':  return json_(requestReset_(req));
+      case 'resetPassword': return json_(resetPassword_(req));
       default:              return json_({ ok: false, error: 'Unknown action.' });
     }
   } catch (err) {
@@ -284,5 +289,78 @@ function deleteAccount_(req) {
       for (let i = rows.length - 1; i >= 0; i--) if (rows[i][1] === email) d.sessions.deleteRow(i + 2);
     }
     return { ok: true };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Forgot password: email a 6-digit code, then set a new password      */
+/* ------------------------------------------------------------------ */
+function requestReset_(req) {
+  const email = normEmail_(req.email);
+  const generic = { ok: true, msg: 'If an account exists for that email, a reset code has been sent.' };
+  if (!validEmail_(email)) return { ok: false, error: 'Please enter a valid email address.' };
+  const cache = CacheService.getScriptCache();
+  const rateKey = 'resetrate_' + email;
+  const sent = Number(cache.get(rateKey) || 0);
+  if (sent >= CFG.MAX_RESET_EMAILS_PER_HOUR) return { ok: false, error: 'Too many reset requests. Please try again in an hour.' };
+  const d = db_();
+  const u = findUser_(d.users, email);
+  cache.put(rateKey, String(sent + 1), 3600);
+  if (!u) return generic;                       // don't reveal whether the email is registered
+  if (MailApp.getRemainingDailyQuota() < 1) return { ok: false, error: 'Reset emails are unavailable today. Please try again tomorrow.' };
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const salt = Utilities.getUuid();
+  cache.put('reset_' + email, JSON.stringify({ salt: salt, hash: hash_(code, salt), tries: 0 }), CFG.RESET_CODE_MINUTES * 60);
+  MailApp.sendEmail({
+    to: email,
+    subject: 'Your IRONDAY reset code: ' + code,
+    name: 'IRONDAY',
+    body: 'Hi ' + u.name + ',\n\nYour IRONDAY password reset code is: ' + code +
+          '\n\nEnter it in the app within ' + CFG.RESET_CODE_MINUTES + ' minutes to choose a new password.' +
+          '\nIf you didn\'t ask for this, you can ignore this email. Your password has not changed.\n\nIRONDAY',
+    htmlBody: '<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;background:#0b0d0c;color:#f2f5f3;border-radius:16px">' +
+      '<h2 style="margin:0 0 8px;letter-spacing:2px">IRON<span style="color:#c8f43a">DAY</span></h2>' +
+      '<p>Hi ' + String(u.name).replace(/[<>&]/g, '') + ',</p><p>Your password reset code is:</p>' +
+      '<p style="font-size:34px;font-weight:bold;letter-spacing:8px;color:#c8f43a;margin:12px 0">' + code + '</p>' +
+      '<p>Enter it in the app within ' + CFG.RESET_CODE_MINUTES + ' minutes to choose a new password.</p>' +
+      '<p style="color:#8f9893;font-size:13px">If you didn\'t ask for this, ignore this email. Your password has not changed.</p></div>'
+  });
+  return generic;
+}
+
+function resetPassword_(req) {
+  const email = normEmail_(req.email);
+  const code = String(req.code || '').replace(/\s/g, '');
+  const password = String(req.password || '');
+  if (password.length < 6 || password.length > 128) return { ok: false, error: 'Password must be at least 6 characters.' };
+  const cache = CacheService.getScriptCache();
+  const key = 'reset_' + email;
+  const raw = cache.get(key);
+  if (!raw) return { ok: false, error: 'This code has expired. Please request a new one.' };
+  const r = JSON.parse(raw);
+  if (!safeEq_(hash_(code, r.salt), r.hash)) {
+    r.tries++;
+    if (r.tries >= CFG.MAX_RESET_TRIES) { cache.remove(key); return { ok: false, error: 'Too many wrong codes. Please request a new one.' }; }
+    cache.put(key, JSON.stringify(r), CFG.RESET_CODE_MINUTES * 60);
+    return { ok: false, error: 'Wrong code. Please check the email and try again.' };
+  }
+  cache.remove(key);
+  cache.remove('fail_' + email);
+  return withLock_(function () {
+    const d = db_();
+    const u = findUser_(d.users, email);
+    if (!u) return { ok: false, error: 'Account not found.' };
+    const salt = Utilities.getUuid();
+    d.users.getRange(u.row, 3, 1, 2).setValues([[salt, hash_(password, salt)]]);
+    d.users.getRange(u.row, 7).setValue(new Date());
+    // sign out every other device
+    const n = d.sessions.getLastRow();
+    if (n >= 2) {
+      const rows = d.sessions.getRange(2, 1, n - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) if (rows[i][1] === email) d.sessions.deleteRow(i + 2);
+    }
+    const token = newSession_(d.sessions, email);
+    const s = readState_(u.fileId);
+    return { ok: true, token: token, user: { email: email, name: u.name }, state: s.state, updated: s.updated };
   });
 }
