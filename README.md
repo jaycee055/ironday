@@ -15,7 +15,14 @@ A personalized fitness app: build your own workout program or pick a ready-made 
 - **Daily dashboard:** today's tasks, phase, streak, % complete, and a "Complete Today's Workout" button
 - **Schedule:** week strip and monthly calendar with rest, done, partial and missed days
 - **Workouts:** one active program at a time; pause, edit, restart, switch, or save programs for later
-- **Exercise library:** 42 illustrated exercises by muscle group (chest, back, shoulders, biceps, triceps, abs, legs, calves) plus mobility, with step-by-step instructions
+- **Exercise library:** 60+ exercises by muscle group (chest, back, shoulders, biceps, triceps, abs, legs, glutes, calves, home cardio) plus mobility, with male and female pictures, with step-by-step instructions
+- **Preferences:** Men / Women / Everyone, Gym / Home, and equipment. These drive recommendations, photos and home swaps.
+- **Women's programs:** Glutes & Legs Sculpt, Toned Full Body, Women's Home Fat Burn, Core & Posture
+- **Home programs:** No-Equipment Beginner, Home Dumbbell Builder, 20-Min HIIT, Home Abs
+- **Swap for home version** on any gym exercise
+- **Start Workout mode:** a guided player with set counter, auto rest, timed moves and weight logging
+- **Quick workouts:** 10/20/30 min by body part, gym or home
+- **Personal records**, **body measurements**, **badges**, and **library search**
 - **Rest timer**, daily reminder banner, weight tracker, progress photos, workout history, and phase unlocking
 
 ## Files
