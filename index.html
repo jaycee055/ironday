@@ -629,7 +629,7 @@ function bind(root){
    OPTIONAL ACCOUNTS — cloud backup + sync (Google Apps Script)
    Leave API_URL empty to hide accounts entirely.
    ========================================================= */
-const API_URL='';
+const API_URL='https://script.google.com/macros/s/AKfycbxl5zfk999NElsGMyhZ_xyw7QK5DVj5zC_B4162zTJre2gsC88PsfIlSryCcr1_9NJjuA/exec';
 const LS_SESSION='ironday.session.v1';
 let SESSION=null; try{SESSION=JSON.parse(localStorage.getItem(LS_SESSION)||'null');}catch(e){}
 let SYNC={st:SESSION?'idle':'off',at:0,msg:''}, cloudT=null, cloudBusy=false, cloudAgain=false;
@@ -788,12 +788,12 @@ function renderChoose(){
     <div style="margin-top:26px"><p class="muted">Hi ${esc(S.user.name)} 👋</p><h1 style="margin-top:6px">Let’s get moving!</h1><p class="muted" style="margin-top:8px">Choose how you want to start your fitness journey.</p></div>
     <div class="choice-grid">
       <button class="choice" data-choose="custom"><img src="img/flex.jpg" alt="">${S.lastType==='custom'?'<span class="badge last">Last used</span>':''}
-        <div><div class="opt">OPTION 1</div><h2>Create your own workout</h2><p>Build your personalized program. Choose exercises, workout days, duration, phases and goals.</p><p class="badge" style="margin-top:12px">Fully customizable</p></div><span class="go">${I.arrow}</span></button>
+        <div><div class="opt">OPTION 1</div><h2>Create your own workout</h2><p>Start instantly with a 3-day plan, then change the exercises, days, phases and goals inside the app whenever you like.</p><p class="badge" style="margin-top:12px">Fully customizable</p></div><span class="go">${I.arrow}</span></button>
       <button class="choice" data-choose="ready"><img src="img/curl2.jpg" alt="">${S.lastType==='ready'?'<span class="badge last">Last used</span>':''}
         <div><div class="opt">OPTION 2</div><h2>Choose a ready-made workout</h2><p>Pick a professionally organized program with daily exercises already prepared.</p><p class="badge" style="margin-top:12px">Ready to start</p></div><span class="go">${I.arrow}</span></button>
     </div></div>`;
   bind($app);
-  $app.querySelectorAll('[data-choose]').forEach(b=>b.onclick=()=>{S.lastType=b.dataset.choose;save();if(b.dataset.choose==='custom'){DRAFT=null;go('create');}else go('ready');});
+  $app.querySelectorAll('[data-choose]').forEach(b=>b.onclick=()=>{S.lastType=b.dataset.choose;save();if(b.dataset.choose==='custom'){quickCustom();}else go('ready');});
 }
 
 /* =========================================================
@@ -1055,12 +1055,27 @@ function renderReadyDetail(){
 let DRAFT=null;
 function newDraft(){return {id:uid(),name:'',goal:'Build muscle',level:'Beginner',startDate:today(),weeks:4,days:[1,3,5],source:'custom',img:'img/flex.jpg',status:'saved',
   phases:[{name:'Beginner Foundation',weeks:4,plan:{}}],_step:1,_ph:0,_day:1};}
+// Create Your Own: start instantly with sensible defaults; details can be edited later (Workouts → Edit)
+function quickCustom(){
+  const go2=()=>{
+    const n=S.programs.filter(p=>p.source==='custom').length;
+    const p={id:uid(),name:n?`My Workout ${n+1}`:'My Workout',goal:S.user?.goal||'Build muscle',level:S.user?.level||'Beginner',startDate:today(),weeks:4,days:[1,3,5],
+      source:'custom',img:'img/flex.jpg',status:'saved',created:Date.now(),
+      phases:[{name:'Phase 1',weeks:4,diff:'Moderate',plan:JSON.parse(JSON.stringify(beginnerPlan))}]};
+    S.programs.push(p); activate(p); S.lastType='custom'; save();
+    go('home');
+    sheet(`<h2>Your workout is ready</h2><p class="muted" style="margin:10px 0 18px">We started <b>${esc(p.name)}</b> with 3 days a week (Mon, Wed, Fri). Change the name, days, phases and exercises any time.</p>
+      <div class="grid2"><button class="btn btn-ghost" data-x>Start training</button><button class="btn btn-lime" data-edit>Customize now</button></div>`,
+      s=>{s.querySelector('[data-x]').onclick=closeSheet;s.querySelector('[data-edit]').onclick=()=>{closeSheet();DRAFT=JSON.parse(JSON.stringify(p));DRAFT._editing=p.id;DRAFT._step=1;DRAFT._ph=0;DRAFT._day=1;go('create');};});
+  };
+  const a=active(); if(a&&a.status!=='saved') confirmSheet('Switch program?','Only one program is active at a time. '+esc(a.name)+' will be saved with its progress.','Create new',go2); else go2();
+}
 function syncWeeks(d){const t=d.phases.reduce((a,p)=>a+(+p.weeks||0),0);d.weeks=t;}
 function renderCreate(){
   if(!DRAFT) DRAFT=newDraft();
   const d=DRAFT, st=d._step||1;
   const head=`<div class="topbar"><div class="row"><button class="icon-btn" id="cBack">${I.back}</button><h2>${d._editing?'Edit program':'Create your workout'}</h2></div><span class="muted small">Step ${st} of 3</span></div>
-   <div class="steps"><i class="on"></i><i class="${st>1?'on':''}"></i><i class="${st>2?'on':''}"></i></div>`;
+   <div class="chips" style="margin:14px 0 18px">${['Details','Phases','Daily exercises'].map((l,i)=>`<button class="chip ${st===i+1?'on':''}" data-step="${i+1}">${i+1}. ${l}</button>`).join('')}</div>`;
   let body='';
   if(st===1){
     body=`<div class="two-col"><div class="stack">
@@ -1098,7 +1113,7 @@ function renderCreate(){
         <div class="grid2" style="margin-top:12px"><button class="btn btn-lime" id="addEx">${I.plus.replace('<svg','<svg width="18" height="18"')} Add exercise</button><button class="btn btn-ghost" id="copyDay">Copy to…</button></div>
       </div></div>`;
   }
-  const foot=`<div class="sticky-foot"><div class="grid2">${st>1?'<button class="btn btn-ghost" id="cPrev">Back</button>':'<span></span>'}<button class="btn btn-lime" id="cNext">${st<3?'Continue':d._editing?'Save changes':'Save & start program'}</button></div>
+  const foot=`<div class="sticky-foot"><div class="grid2">${d._editing&&st<3?'<button class="btn btn-ghost" id="cSaveEdit">Save changes</button>':st>1?'<button class="btn btn-ghost" id="cPrev">Back</button>':'<span></span>'}<button class="btn btn-lime" id="cNext">${st<3?'Next':d._editing?'Save changes':'Save & start program'}</button></div>
      ${st===3&&!d._editing?'<button class="btn btn-ghost btn-block" id="cSaveOnly" style="margin-top:10px">Save for later</button>':''}</div>`;
   return head+body+foot+afterHome(()=>wireCreate());
 }
@@ -1107,8 +1122,10 @@ function wireCreate(){
   const keep=()=>{ if(st===1){d.name=$('fName').value;d.goal=$('fGoal').value;d.level=$('fLevel').value;d.startDate=$('fStart').value||today();}
     if(st===2){document.querySelectorAll('[data-pn]').forEach(i=>d.phases[+i.dataset.pn].name=i.value);document.querySelectorAll('[data-pw]').forEach(i=>d.phases[+i.dataset.pw].weeks=Math.max(1,Math.min(26,+i.value||1)));document.querySelectorAll('[data-pdf]').forEach(i=>d.phases[+i.dataset.pdf].diff=i.value);syncWeeks(d);}
     if(st===3){const dd=d.phases[d._ph].plan[d._day];if(dd){dd.title=$('dTitle').value;document.querySelectorAll('[data-ts]').forEach(i=>dd.tasks[+i.dataset.ts].sets=Math.max(1,+i.value||1));document.querySelectorAll('[data-tr]').forEach(i=>dd.tasks[+i.dataset.tr].reps=Math.max(1,+i.value||1));}}};
-  $('cBack').onclick=()=>{keep();confirmSheet('Leave builder?','Your unsaved changes will be lost.','Leave',()=>{DRAFT=null;go(S.programs.length?'workouts':'choose');});};
+  $('cBack').onclick=()=>{keep();confirmSheet(d._editing?'Discard changes?':'Leave builder?','Your unsaved changes will be lost.','Leave',()=>{DRAFT=null;go(S.programs.length?'workouts':'choose');});};
   $('cPrev')&&($('cPrev').onclick=()=>{keep();d._step--;route();});
+  document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>{keep();if(!d.days.length){toast('Pick at least one workout day');return;}d._step=+b.dataset.step;d._ph=Math.min(d._ph||0,d.phases.length-1);if(!d.days.includes(d._day))d._day=d.days[0];route();});
+  $('cSaveEdit')&&($('cSaveEdit').onclick=()=>{keep();if(!d.days.length){toast('Pick at least one workout day');return;}finish(false);});
   document.querySelectorAll('[data-wd]').forEach(b=>b.onclick=()=>{keep();const w=+b.dataset.wd;d.days=d.days.includes(w)?d.days.filter(x=>x!==w):[...d.days,w];route();});
   $('addPh')&&($('addPh').onclick=()=>{keep();const last=d.phases[d.phases.length-1];const names=['Beginner Foundation','Strength Building','Fat Loss','Advanced Training'];d.phases.push({name:names[d.phases.length]||'Phase '+(d.phases.length+1),weeks:2,diff:'Hard',plan:JSON.parse(JSON.stringify(last.plan))});route();});
   document.querySelectorAll('[data-prm]').forEach(b=>b.onclick=()=>{keep();d.phases.splice(+b.dataset.prm,1);route();});
