@@ -77,7 +77,7 @@ select.input{appearance:none;background-image:linear-gradient(45deg,transparent 
 /* ---------- auth / onboarding ---------- */
 .auth{min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:1fr}
 .auth-hero{position:relative;min-height:100vh;min-height:100dvh;background:#000 url(img/cover.jpg) center 20%/cover no-repeat;display:flex;flex-direction:column;justify-content:flex-end}
-.auth-hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,13,12,.15) 0%,rgba(11,13,12,.2) 35%,rgba(11,13,12,.92) 68%,var(--bg) 100%)}
+.auth-hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(11,13,12,.1) 0%,rgba(11,13,12,.25) 28%,rgba(11,13,12,.9) 55%,var(--bg) 80%)}
 .auth-panel{position:relative;z-index:1;padding:24px 22px calc(28px + var(--safe-b));max-width:480px;width:100%;margin:0 auto}
 .brand{font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:.08em}
 .brand b{color:var(--lime)}
@@ -477,6 +477,7 @@ function save(){
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{ if(DOC){ DOC.set({json:JSON.stringify(S),updated:S.updated}).catch(()=>{}); } },700);
+  if(typeof cloudSave==='function') cloudSave();
 }
 function savePhotos(){try{localStorage.setItem(LS_PHOTOS,JSON.stringify(PHOTOS));}catch(e){toast('Not enough space to store more photos on this device');}}
 (async()=>{
@@ -625,24 +626,156 @@ function bind(root){
 }
 
 /* =========================================================
+   OPTIONAL ACCOUNTS — cloud backup + sync (Google Apps Script)
+   Leave API_URL empty to hide accounts entirely.
+   ========================================================= */
+const API_URL='';
+const LS_SESSION='ironday.session.v1';
+let SESSION=null; try{SESSION=JSON.parse(localStorage.getItem(LS_SESSION)||'null');}catch(e){}
+let SYNC={st:SESSION?'idle':'off',at:0,msg:''}, cloudT=null, cloudBusy=false, cloudAgain=false;
+const accountsOn=()=>!!API_URL;
+function setSession(v){SESSION=v;try{v?localStorage.setItem(LS_SESSION,JSON.stringify(v)):localStorage.removeItem(LS_SESSION);}catch(e){}}
+async function api(action,data={}){
+  const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,...data})});
+  if(!r.ok) throw new Error('Network error ('+r.status+')');
+  return r.json();
+}
+function syncLabel(){
+  if(!SESSION) return '';
+  if(SYNC.st==='saving') return 'Syncing…';
+  if(SYNC.st==='saved') return 'Backed up '+new Date(SYNC.at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+  if(SYNC.st==='offline') return 'Offline: will back up when you’re online';
+  if(SYNC.st==='error') return SYNC.msg||'Backup failed. Will retry';
+  return 'Backup on';
+}
+function paintSync(){document.querySelectorAll('[data-sync]').forEach(el=>el.textContent=syncLabel());}
+function cloudSave(){ if(!SESSION||!accountsOn()) return; clearTimeout(cloudT); cloudT=setTimeout(cloudPush,1500); }
+async function cloudPush(){
+  if(!SESSION) return; if(cloudBusy){cloudAgain=true;return;}
+  cloudBusy=true; SYNC.st='saving'; paintSync();
+  try{
+    const r=await api('save',{token:SESSION.token,state:JSON.stringify(S),updated:S.updated});
+    if(r.ok){SYNC={st:'saved',at:Date.now()};}
+    else if(r.auth===false){signedOutBySever(r.error);}
+    else SYNC={st:'error',msg:r.error};
+  }catch(e){SYNC={st:'offline'};}
+  cloudBusy=false; paintSync();
+  if(cloudAgain){cloudAgain=false;cloudPush();}
+}
+function signedOutBySever(msg){setSession(null);SYNC={st:'off'};toast(msg||'Please sign in again');route();}
+window.addEventListener('online',()=>{if(SESSION&&SYNC.st==='offline')cloudPush();});
+async function cloudLoad(){
+  if(!SESSION||!accountsOn()) return;
+  try{
+    const r=await api('load',{token:SESSION.token});
+    if(!r.ok){ if(r.auth===false) signedOutBySever(r.error); return; }
+    if(r.state && (r.updated||0)>(S.updated||0)){ S=Object.assign(blank(),r.state); try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){} SYNC={st:'saved',at:Date.now()}; route(); }
+    else if((S.updated||0)>(r.updated||0)) cloudPush();
+    else { SYNC={st:'saved',at:Date.now()}; paintSync(); }
+  }catch(e){ SYNC={st:'offline'}; paintSync(); }
+}
+// After signing in: use the cloud copy if it has data, otherwise keep this device's data and upload it.
+function adoptCloud(r){
+  const user={...(S.user||{}),name:r.user.name,email:r.user.email};
+  if(r.state && (r.state.programs?.length || r.state.history?.length || r.state.weights?.length)){
+    S=Object.assign(blank(),r.state); S.user=Object.assign({goal:'Build muscle',level:'Beginner',joined:today()},r.state.user||{},{email:r.user.email});
+  }else{
+    S.user=Object.assign({goal:'Build muscle',level:'Beginner',joined:today()},user);
+  }
+  setSession({token:r.token,email:r.user.email});
+  SYNC={st:'saved',at:Date.now()}; save();
+}
+
+/* =========================================================
    LOGIN / COVER
    ========================================================= */
-function renderAuth(){
-  const form=`<div class="stack">
-    <div><div class="dots"><i class="on"></i><i></i><i></i></div></div>
-    <h1>Transform your body.<br><span class="lime">Own every day.</span></h1>
-    <p class="muted">Build your own program or start a ready-made plan. Daily tasks, phases and progress — all in one place.</p>
-    <form id="authf" class="stack" autocomplete="on">
+let AUTH_MODE='guest';
+function authFormHtml(mode){
+  const arrow=I.arrow.replace('<svg','<svg width="20" height="20"');
+  if(mode==='login') return `<form class="authf stack" data-mode="login" autocomplete="on">
+      <label class="field"><span>Email</span><input class="input" type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
+      <label class="field"><span>Password</span><input class="input" type="password" name="password" required minlength="6" autocomplete="current-password" placeholder="Your password"></label>
+      <p class="small" data-err style="color:var(--red);min-height:0"></p>
+      <button class="btn btn-lime btn-block" type="submit">Sign In ${arrow}</button></form>`;
+  if(mode==='signup') return `<form class="authf stack" data-mode="signup" autocomplete="on">
+      <label class="field"><span>Your name</span><input class="input" name="name" required autocomplete="given-name" placeholder="e.g. Jason" value="${esc(S.user?.name||'')}"></label>
+      <label class="field"><span>Email</span><input class="input" type="email" name="email" required autocomplete="email" placeholder="you@example.com" value="${esc(S.user?.email||'')}"></label>
+      <label class="field"><span>Password (min. 6 characters)</span><input class="input" type="password" name="password" required minlength="6" autocomplete="new-password" placeholder="Create a password"></label>
+      <label class="row small" style="align-items:flex-start;gap:10px;cursor:pointer"><input type="checkbox" name="consent" required style="width:20px;height:20px;accent-color:var(--lime);margin-top:1px;flex:none"><span class="muted">I agree to the <a class="link" href="privacy.html">privacy policy</a>. My workout data will be backed up online so I can sign in on other devices.</span></label>
+      <p class="small" data-err style="color:var(--red)"></p>
+      <button class="btn btn-lime btn-block" type="submit">Create Account ${arrow}</button></form>`;
+  return `<form class="authf stack" data-mode="guest" autocomplete="on">
       <label class="field"><span>Your name</span><input class="input" name="name" required placeholder="e.g. Jason" autocomplete="given-name"></label>
-      <label class="field"><span>Email (optional)</span><input class="input" type="email" name="email" placeholder="you@example.com" autocomplete="email"></label>
-      <button class="btn btn-lime btn-block" type="submit">Get Started ${I.arrow.replace('<svg','<svg width="20" height="20"')}</button>
-    </form>
-    <p class="tiny muted" style="text-align:center">Your profile and progress are saved on this device. <a class="link" href="privacy.html">Privacy</a></p></div>`;
+      <button class="btn btn-lime btn-block" type="submit">Get Started ${arrow}</button></form>`;
+}
+function authSwitchHtml(mode){
+  if(!accountsOn()) return '';
+  if(mode==='guest') return `<div class="divider">or</div><div class="grid2"><button class="btn btn-ghost" data-am="login">Sign in</button><button class="btn btn-ghost" data-am="signup">Create account</button></div>
+     <p class="tiny muted" style="text-align:center">An account is optional. It backs up your progress and syncs it to other devices.</p>`;
+  return `<p class="small muted" style="text-align:center">${mode==='login'?`New here? <span class="link" data-am="signup">Create an account</span>`:`Already have an account? <span class="link" data-am="login">Sign in</span>`}</p>
+     <p class="small" style="text-align:center"><span class="link" data-am="guest" style="color:var(--muted)">Continue without an account</span></p>`;
+}
+async function submitAuth(f,after){
+  const fd=new FormData(f), mode=f.dataset.mode, err=f.querySelector('[data-err]'), btn=f.querySelector('button[type=submit]');
+  if(mode==='guest'){const name=String(fd.get('name')||'').trim();if(!name)return;
+    S.user={name,email:'',goal:'Build muscle',level:'Beginner',joined:today()};save();after();return;}
+  const label=btn.innerHTML; btn.disabled=true; btn.textContent=mode==='login'?'Signing in…':'Creating account…'; if(err) err.textContent='';
+  try{
+    const payload=mode==='login'
+      ?{email:fd.get('email'),password:fd.get('password')}
+      :{name:fd.get('name'),email:fd.get('email'),password:fd.get('password'),consent:!!fd.get('consent'),state:JSON.stringify({...S,user:{...(S.user||{}),name:String(fd.get('name')||'').trim(),email:String(fd.get('email')||'').trim(),goal:S.user?.goal||'Build muscle',level:S.user?.level||'Beginner',joined:S.user?.joined||today()}}),updated:Date.now()};
+    const r=await api(mode,payload);
+    if(!r.ok){ if(err) err.textContent=r.error||'Something went wrong.'; btn.disabled=false; btn.innerHTML=label; return; }
+    adoptCloud(r); toast(mode==='login'?'Welcome back, '+r.user.name+'!':'Account created. Your progress is backed up.'); after();
+  }catch(e){ if(err) err.textContent='Can’t reach the server. Check your internet connection and try again.'; btn.disabled=false; btn.innerHTML=label; }
+}
+function wireAuth(root,after,rerender){
+  root.querySelectorAll('.authf').forEach(f=>f.onsubmit=e=>{e.preventDefault();submitAuth(f,after);});
+  root.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{AUTH_MODE=b.dataset.am;rerender();});
+}
+function renderAuth(){
+  const mode=accountsOn()?AUTH_MODE:'guest';
+  const title=mode==='login'?`Welcome<br><span class="lime">back.</span>`:mode==='signup'?`Create your<br><span class="lime">account.</span>`:`Transform your body.<br><span class="lime">Own every day.</span>`;
+  const sub=mode==='login'?'Sign in to get your programs and progress on this device.':mode==='signup'?'Back up your progress and use it on any phone or computer.':'Build your own program or start a ready-made plan. Daily tasks, phases and progress, all in one place.';
+  const form=`<div class="stack">
+    <div><div class="dots"><i class="${mode==='guest'?'on':''}"></i><i class="${mode==='login'?'on':''}"></i><i class="${mode==='signup'?'on':''}"></i></div></div>
+    <h1>${title}</h1><p class="muted">${sub}</p>
+    ${authFormHtml(mode)}${authSwitchHtml(mode)}
+    ${mode==='guest'?`<p class="tiny muted" style="text-align:center">Your progress is saved on this device. <a class="link" href="privacy.html">Privacy</a></p>`:''}</div>`;
   $app.innerHTML=`<div class="auth">
     <div class="auth-hero"><div class="auth-top brand">IRON<b>DAY</b></div><div class="auth-panel">${form}</div></div>
     <div class="auth-side"><div class="auth-panel" style="max-width:440px">${form}</div></div></div>`;
-  $app.querySelectorAll('#authf').forEach(f=>f.onsubmit=e=>{e.preventDefault();const fd=new FormData(f);const name=String(fd.get('name')||'').trim();if(!name)return;
-    S.user={name,email:String(fd.get('email')||'').trim(),goal:'Build muscle',level:'Beginner',joined:today()};save();go(S.programs.length?'home':'choose');});
+  wireAuth($app,()=>{AUTH_MODE='guest';go(S.programs.length?'home':'choose');},renderAuth);
+}
+function openAccountSheet(mode){
+  const draw=s=>{s.querySelector('#acctBody').innerHTML=`<h2>${mode==='login'?'Sign in':'Create account'}</h2><p class="muted small" style="margin:6px 0 16px">${mode==='login'?'If your account already has data, it replaces what’s on this device.':'Your current programs and progress will be backed up to your new account.'}</p>${authFormHtml(mode)}
+      <p class="small muted" style="text-align:center;margin-top:14px">${mode==='login'?`New here? <span class="link" data-sm="signup">Create an account</span>`:`Already have an account? <span class="link" data-sm="login">Sign in</span>`}</p>`;
+    wireAuth(s,()=>{closeSheet();route();},()=>{});
+    s.querySelectorAll('[data-sm]').forEach(b=>b.onclick=()=>{mode=b.dataset.sm;draw(s);});};
+  sheet(`<div class="row between" style="margin-bottom:6px"><span></span><button class="icon-btn" data-x>${I.x}</button></div><div id="acctBody"></div>`,s=>{s.querySelector('[data-x]').onclick=closeSheet;draw(s);});
+}
+function accountCard(){
+  if(!accountsOn()) return '';
+  if(!SESSION) return `<div class="card"><h3>Back up your progress</h3><p class="small muted" style="margin:6px 0 14px">Right now your data is only on this device. Create a free account to back it up and use it on other devices. This is optional.</p>
+    <div class="grid2"><button class="btn btn-lime" data-acct="signup">Create account</button><button class="btn btn-ghost" data-acct="login">Sign in</button></div></div>`;
+  return `<div class="card"><h3>Account &amp; backup</h3>
+    <div class="setting"><div><b>${esc(SESSION.email)}</b><p class="small muted" data-sync>${syncLabel()}</p></div><button class="btn btn-ghost btn-sm" data-acct="sync">Sync now</button></div>
+    <div class="setting"><div><b>Delete account</b><p class="small muted">Removes your online backup. Data on this device is kept.</p></div><button class="btn btn-danger btn-sm" data-acct="delete">Delete</button></div></div>`;
+}
+function wireAccount(){
+  document.querySelectorAll('[data-acct]').forEach(b=>b.onclick=()=>{
+    const a=b.dataset.acct;
+    if(a==='signup'||a==='login') return openAccountSheet(a);
+    if(a==='sync') return cloudLoad().then(()=>toast('Synced'));
+    if(a==='delete') sheet(`<h2>Delete account?</h2><p class="muted" style="margin:10px 0 16px">This permanently deletes your online backup for <b>${esc(SESSION.email)}</b>. Your data on this device stays. Enter your password to confirm.</p>
+       <input class="input" type="password" id="delPw" placeholder="Password" autocomplete="current-password"><p class="small" id="delErr" style="color:var(--red);margin-top:8px"></p>
+       <div class="grid2" style="margin-top:12px"><button class="btn btn-ghost" data-x>Cancel</button><button class="btn btn-danger" id="delGo">Delete account</button></div>`,s=>{
+        s.querySelector('[data-x]').onclick=closeSheet;
+        s.querySelector('#delGo').onclick=async()=>{const pw=s.querySelector('#delPw').value;if(!pw)return;const g=s.querySelector('#delGo');g.disabled=true;g.textContent='Deleting…';
+          try{const r=await api('deleteAccount',{token:SESSION.token,password:pw});if(!r.ok){s.querySelector('#delErr').textContent=r.error;g.disabled=false;g.textContent='Delete account';return;}
+            setSession(null);SYNC={st:'off'};if(S.user)S.user.email='';save();closeSheet();toast('Account deleted');route();}
+          catch(e){s.querySelector('#delErr').textContent='Can’t reach the server. Try again.';g.disabled=false;g.textContent='Delete account';}};});
+  });
 }
 
 /* =========================================================
@@ -1086,11 +1219,12 @@ function renderProfile(){
      <div class="setting"><b>Default rest timer</b><select class="input" id="pRest" style="width:140px">${[30,60,90,120,180].map(v=>`<option value="${v}" ${v===S.settings.rest?'selected':''}>${v} seconds</option>`).join('')}</select></div>
      <div class="setting"><div><b>Preferred start</b><p class="small muted">Remembered from your last choice.</p></div><span class="badge gray">${S.lastType==='custom'?'Create your own':S.lastType==='ready'?'Ready-made':'—'}</span></div>
     </div>
+    ${accountCard()}
     ${installCard()}
-    <div class="card"><h3>Account</h3>
+    <div class="card"><h3>${SESSION?'This device':'Account'}</h3>
      <div class="setting"><b>Programs saved</b><span>${S.programs.length}</span></div>
      <div class="setting"><b>Sign out</b><button class="btn btn-ghost btn-sm" id="pOut">Sign out</button></div>
-     <div class="setting"><div><b>Reset all data</b><p class="small muted">Deletes programs, progress and history.</p></div><button class="btn btn-danger btn-sm" id="pReset">Reset</button></div>
+     <div class="setting"><div><b>Reset all data</b><p class="small muted">Deletes programs, progress and history${SESSION?', including your online backup':''}.</p></div><button class="btn btn-danger btn-sm" id="pReset">Reset</button></div>
      <div class="setting"><b>Privacy policy</b><a class="link" href="privacy.html">Read</a></div>
     </div></div></div>`+afterHome(()=>{
     const $=id=>document.getElementById(id);
@@ -1099,7 +1233,10 @@ function renderProfile(){
     $('pRem').onclick=()=>{S.settings.reminder=!S.settings.reminder;save();route();};
     $('pTime').onchange=e=>{S.settings.remindAt=e.target.value||'18:00';save();toast('Reminder time saved');};
     $('pRest').onchange=e=>{S.settings.rest=+e.target.value;save();toast('Rest timer updated');};
-    $('pOut').onclick=()=>confirmSheet('Sign out?','Your programs and progress stay saved for when you come back.','Sign out',()=>{S.user=null;save();route();});
+    wireAccount();
+    $('pOut').onclick=()=>SESSION
+      ?confirmSheet('Sign out?','Your data is backed up to your account. Signing out removes it from this device; sign in again any time to get it back. Progress photos are only stored on this device and will be removed.','Sign out',async()=>{try{clearTimeout(cloudT);await cloudPush();api('logout',{token:SESSION.token}).catch(()=>{});}catch(e){}setSession(null);SYNC={st:'off'};S=blank();PHOTOS=[];savePhotos();try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}AUTH_MODE='login';route();})
+      :confirmSheet('Sign out?','You don’t have an account, so your programs and progress stay on this device for when you come back.','Sign out',()=>{S.user=null;save();route();});
     $('pReset').onclick=()=>confirmSheet('Reset everything?','This permanently deletes all programs, completed tasks, weights and history.','Reset',()=>{const keep=S.user;S=blank();S.user=keep;PHOTOS=[];savePhotos();save();go('choose');},true);
   });
 }
@@ -1110,18 +1247,31 @@ const STANDALONE=()=>{try{return matchMedia('(display-mode: standalone)').matche
 const IS_IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();INSTALL_EVT=e;if(VIEW.name==='profile')route();});
 window.addEventListener('appinstalled',()=>{INSTALL_EVT=null;toast('IRONDAY installed!');});
+const NATIVE=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+const APK_URL='https://github.com/jaycee055/ironday/releases/latest/download/IRONDAY.apk';
 function installCard(){
-  if(STANDALONE()) return '';
+  if(NATIVE||STANDALONE()) return '';
+  const apk=(!IS_IOS&&/Android/i.test(navigator.userAgent))?`<a class="btn btn-ghost btn-block" style="margin-top:10px" href="${APK_URL}">Download the Android app (APK)</a>`:'';
+  if(INSTALL_EVT) return `<div class="card"><h3>Install the app</h3><p class="small muted" style="margin:6px 0 12px">Add IRONDAY to your home screen. It opens full-screen and works offline.</p><button class="btn btn-lime btn-block" id="pInstall">Install IRONDAY</button>${apk}</div>`;
+  if(apk) return `<div class="card"><h3>Get the Android app</h3><p class="small muted" style="margin:6px 0 4px">Install IRONDAY as an app on your phone.</p>${apk}</div>`;
   if(INSTALL_EVT) return `<div class="card"><h3>Install the app</h3><p class="small muted" style="margin:6px 0 12px">Add IRONDAY to your home screen. It opens full-screen and works offline.</p><button class="btn btn-lime btn-block" id="pInstall">Install IRONDAY</button></div>`;
   if(IS_IOS) return `<div class="card"><h3>Add to Home Screen</h3><p class="small muted" style="margin-top:6px">In Safari, tap the <b>Share</b> button, then <b>Add to Home Screen</b>. IRONDAY will open full-screen and work offline.</p></div>`;
   return '';
 }
-if('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !/claude\.(ai|site)|claudeusercontent|anthropic/.test(location.hostname)){
+if(!NATIVE && 'serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !/claude\.(ai|site)|claudeusercontent|anthropic/.test(location.hostname)){
   window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
 
+/* ---------- Android back button (native app) ---------- */
+if(NATIVE){try{const App=window.Capacitor.Plugins.App;App&&App.addListener('backButton',()=>{
+  if(document.querySelector('.scrim')){closeSheet();return;}
+  if(!S.user||VIEW.name==='home'||(VIEW.name==='choose'&&!S.programs.length)){App.exitApp();return;}
+  if(VIEW.name==='readyDetail'){go('ready');return;}
+  if(['ready','create','library','choose'].includes(VIEW.name)){go(S.programs.length?'workouts':'choose');return;}
+  go('home');});}catch(e){}}
+
 /* ---------- boot ---------- */
-(function boot(){const h=location.hash.slice(1);VIEW={name:TABS.some(t=>t[0]===h)?h:'home'};route();})();
+(function boot(){const h=location.hash.slice(1);VIEW={name:TABS.some(t=>t[0]===h)?h:'home'};route();if(SESSION)cloudLoad();})();
 </script>
 </body>
 </html>

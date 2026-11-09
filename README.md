@@ -4,7 +4,9 @@ A personalized fitness app: build your own workout program or pick a ready-made 
 
 **Open the app:** https://jaycee055.github.io/ironday/
 
-On a phone, open the link and use **Add to Home Screen** (iPhone: Share → Add to Home Screen; Android: Profile → Install IRONDAY). It opens full-screen and works offline.
+**Android app:** [Download IRONDAY.apk](https://github.com/jaycee055/ironday/releases/latest/download/IRONDAY.apk) (always the newest version). Open it on your phone and allow installing from your browser if asked.
+
+**iPhone:** open the website in Safari → Share → **Add to Home Screen**. It opens full-screen and works offline.
 
 ## Features
 - **Start screen with two choices:** Create Your Own Workout, or Choose a Ready-Made Workout. The app remembers which one you picked last.
@@ -23,6 +25,11 @@ On a phone, open the link and use **Add to Home Screen** (iPhone: Share → Add 
 | `img/` | Model photos and exercise illustrations |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Installable app and offline support |
 | `privacy.html` | Privacy policy |
+| `backend/` | Optional accounts server (Google Apps Script) |
+| `android-app/`, `.github/workflows/android.yml` | Android app wrapper and automatic APK build |
 
-## Your data
-Progress is saved in your browser on your device. See [privacy.html](privacy.html).
+## Your data and optional accounts
+Without an account, everything is saved on the device. Users can optionally create an account to back up and sync their data across devices. Accounts run free on Google Apps Script in the owner's Google account (see [backend/SETUP.md](backend/SETUP.md)). Progress photos never leave the device. See [privacy.html](privacy.html).
+
+## Android build
+`.github/workflows/android.yml` builds a signed APK on every push to `main` and publishes it under **Releases**. The signing key is `android-app/release.keystore`. Its password is in the workflow as a fallback; to keep it private, add a repository secret `ANDROID_KEYSTORE_PASSWORD` with the same value and remove the fallback. **Never lose the keystore:** without it, new versions can't install over old ones.

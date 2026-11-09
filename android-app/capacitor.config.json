@@ -1,0 +1,6 @@
+{
+  "appId": "io.github.jaycee055.ironday",
+  "appName": "IRONDAY",
+  "webDir": "www",
+  "android": { "backgroundColor": "#0b0d0c" }
+}
